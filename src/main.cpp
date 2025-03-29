@@ -118,45 +118,52 @@ void execute_external_command(const vector<string> &args)
 vector<string> parse_input(const string &input)
 {
   vector<string> args;
-  string current;
+  string word;
   bool in_single_quotes = false;
   bool in_double_quotes = false;
+  bool escaped = false;
 
   for (size_t i = 0; i < input.size(); ++i)
   {
     char c = input[i];
 
-    if (c == '\'' && in_double_quotes && (i + 1 < input.size()) &&
-        (input[i + 1] == '\'' || input[i + 1] == '"' || input[i + 1] == '$'))
+    if (escaped)
     {
-      current += input[++i];
-    }
+      if (in_double_quotes && (c != '"' && c != '\\'))
+        word += '\\';
 
-    else if (c == '\'' && !in_double_quotes)
+      word += c;
+      escaped = false;
+    }
+    else if (c == '\\')
     {
-      in_single_quotes = !in_single_quotes;
+      escaped = true;
     }
     else if (c == '"' && !in_single_quotes)
     {
       in_double_quotes = !in_double_quotes;
     }
+    else if (c == '\'' && !in_double_quotes)
+    {
+      in_single_quotes = !in_single_quotes;
+    }
     else if (c == ' ' && !in_single_quotes && !in_double_quotes)
     {
-      if (!current.empty())
+      if (!word.empty())
       {
-        args.push_back(current);
-        current.clear();
+        args.push_back(word);
+        word.clear();
       }
     }
     else
     {
-      current += c;
+      word += c;
     }
   }
 
-  if (!current.empty())
+  if (!word.empty())
   {
-    args.push_back(current);
+    args.push_back(word);
   }
 
   return args;
