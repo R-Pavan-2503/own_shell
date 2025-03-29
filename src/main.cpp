@@ -129,8 +129,8 @@ vector<string> parse_input(const string &input)
 
     if (escaped)
     {
-      // Inside double quotes, only `"` and `\` should be escaped
-      if (in_double_quotes && (c != '"' && c != '\\'))
+      // Inside double quotes, only escape certain characters
+      if (in_double_quotes && (c != '\\' && c != '$' && c != '"' && c != '\n'))
         word += '\\';
 
       word += c;
@@ -140,13 +140,13 @@ vector<string> parse_input(const string &input)
     {
       escaped = true;
     }
-    else if (c == '\'' && !in_double_quotes)
-    {
-      in_single_quotes = !in_single_quotes;
-    }
     else if (c == '"' && !in_single_quotes)
     {
       in_double_quotes = !in_double_quotes;
+    }
+    else if (c == '\'' && !in_double_quotes)
+    {
+      in_single_quotes = !in_single_quotes;
     }
     else if (c == ' ' && !in_single_quotes && !in_double_quotes)
     {
