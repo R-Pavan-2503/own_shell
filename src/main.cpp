@@ -5,14 +5,28 @@
 #include <sstream>
 #include <vector>
 #include <sys/stat.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstring>
+#endif
+
 using namespace std;
 
+// Check if a file is executable (Only for Linux/Mac)
+#ifndef _WIN32
 bool is_executable(const string &path)
 {
   struct stat buffer;
   return (stat(path.c_str(), &buffer) == 0 && (buffer.st_mode & S_IXUSR));
 }
+#endif
 
+// Find an executable in the PATH environment variable
 string find_in_path(const string &cmd)
 {
   char *path_env = getenv("PATH");
@@ -25,17 +39,84 @@ string find_in_path(const string &cmd)
   while (getline(ss, dir, ':'))
   {
     string full_path = dir + "/" + cmd;
+
+#ifndef _WIN32
     if (is_executable(full_path))
     {
-      return full_path; 
+#else
+    if (GetFileAttributesA(full_path.c_str()) != INVALID_FILE_ATTRIBUTES)
+    {
+#endif
+      return full_path;
     }
   }
   return "";
 }
 
+// Execute external command (Cross-platform implementation)
+void execute_external_command(const vector<string> &args)
+{
+  if (args.empty())
+    return;
+
+  string cmd_path = find_in_path(args[0]);
+  if (cmd_path.empty())
+  {
+    cout << args[0] << ": command not found" << endl;
+    return;
+  }
+
+#ifdef _WIN32
+  // Windows: Use CreateProcess
+  string command = cmd_path;
+  for (size_t i = 1; i < args.size(); ++i)
+  {
+    command += " " + args[i];
+  }
+
+  STARTUPINFOA si = {sizeof(si)};
+  PROCESS_INFORMATION pi;
+
+  if (CreateProcessA(NULL, const_cast<char *>(command.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+  {
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+  }
+  else
+  {
+    cerr << "Failed to execute: " << command << endl;
+  }
+#else
+  // Linux/Mac: Use fork + execvp
+  vector<char *> c_args;
+  for (const string &arg : args)
+  {
+    c_args.push_back(const_cast<char *>(arg.c_str()));
+  }
+  c_args.push_back(nullptr);
+
+  pid_t pid = fork();
+  if (pid == 0)
+  {
+    execvp(cmd_path.c_str(), c_args.data());
+    perror("execvp failed");
+    exit(1);
+  }
+  else if (pid > 0)
+  {
+    int status;
+    waitpid(pid, &status, 0);
+  }
+  else
+  {
+    perror("fork failed");
+  }
+#endif
+}
+
 int main()
 {
-  // Flush after every cout / std:cerr
   cout << unitbuf;
   cerr << unitbuf;
 
@@ -56,16 +137,35 @@ int main()
       return 0;
     }
 
-    if (input.rfind("echo", 0) == 0)
+    stringstream ss(input);
+    vector<string> args;
+    string word;
+    while (ss >> word)
     {
-      cout << input.substr(5) << endl;
+      args.push_back(word);
+    }
+
+    if (args.empty())
+      continue;
+
+    if (args[0] == "echo")
+    {
+      for (size_t i = 1; i < args.size(); ++i)
+      {
+        cout << args[i] << (i + 1 < args.size() ? " " : "");
+      }
+      cout << endl;
       continue;
     }
 
-    if (input.rfind("type", 0) == 0)
+    if (args[0] == "type")
     {
-      string cmd = input.substr(5);
-
+      if (args.size() < 2)
+      {
+        cout << "type: missing operand" << endl;
+        continue;
+      }
+      string cmd = args[1];
       if (builtins.count(cmd))
       {
         cout << cmd << " is a shell builtin" << endl;
@@ -73,7 +173,6 @@ int main()
       else
       {
         string path = find_in_path(cmd);
-
         if (!path.empty())
         {
           cout << cmd << " is " << path << endl;
@@ -86,8 +185,8 @@ int main()
       continue;
     }
 
-    cout << input << ": command not found" << endl;
+    // Run external command
+    execute_external_command(args);
   }
-
   return 0;
 }
