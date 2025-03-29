@@ -1,6 +1,37 @@
 #include <iostream>
+#include <string>
 #include <unordered_set>
+#include <cstdlib>
+#include <sstream>
+#include <vector>
+#include <sys/stat.h>
 using namespace std;
+
+bool is_executable(const string &path)
+{
+  struct stat buffer;
+  return (stat(path.c_str(), &buffer) == 0 && (buffer.st_mode & S_IXUSR));
+}
+
+string find_in_path(const string &cmd)
+{
+  char *path_env = getenv("PATH");
+  if (!path_env)
+    return "";
+
+  stringstream ss(path_env);
+  string dir;
+
+  while (getline(ss, dir, ':'))
+  {
+    string full_path = dir + "/" + cmd;
+    if (is_executable(full_path))
+    {
+      return full_path; 
+    }
+  }
+  return "";
+}
 
 int main()
 {
@@ -41,7 +72,16 @@ int main()
       }
       else
       {
-        cout << cmd << " not found" << endl;
+        string path = find_in_path(cmd);
+
+        if (!path.empty())
+        {
+          cout << cmd << " is " << path << endl;
+        }
+        else
+        {
+          cout << cmd << ": not found" << endl;
+        }
       }
       continue;
     }
