@@ -1,0 +1,18 @@
+Summary
+
+Function	                                        Purpose
+GetFileAttributesA 	                                Check if a file exists (Windows).
+INVALID_FILE_ATTRIBUTES  	                        Error return value from GetFileAttributesA.
+STARTUPINFOA  	                                    Specifies process startup info (Windows).
+PROCESS_INFORMATION  	                            Stores info about a created process.
+CreateProcessA  	                                Runs an external program (Windows).
+const_cast  	                                    Removes const from a variable.
+c_str()  	                                        Converts std::string to char*.
+WaitForSingleObject   	                            Waits for a process to finish.
+CloseHandle  	                                    Closes process handles.
+execvp  	                                        Executes a command (Linux).
+perror  	                                        Prints system call errors.
+waitpid  	                                        Waits for a child process (Linux).
+stringstream  	                                    Splits input into words.
+stat  	                                            Gets file information.
+buffer.st_mode & S_IXUSR  	                        Checks if a file is executable.

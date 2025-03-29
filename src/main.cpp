@@ -115,6 +115,43 @@ void execute_external_command(const vector<string> &args)
 #endif
 }
 
+vector<string> parse_input(const string &input)
+{
+  vector<string> args;
+  string arg;
+
+  bool in_quotes = false;
+
+  for (size_t i = 0; i < input.length(); i++)
+  {
+    char c = input[i];
+
+    if (c == '\'')
+    {
+      in_quotes = !in_quotes;
+    }
+    else if (c == ' ' && !in_quotes)
+    {
+      if (!arg.empty())
+      {
+        args.push_back(arg);
+        arg.clear();
+      }
+    }
+    else
+    {
+      arg += c;
+    }
+  }
+
+  if (!arg.empty())
+  {
+    args.push_back(arg);
+  }
+
+  return args;
+}
+
 int main()
 {
   cout << unitbuf;
@@ -137,13 +174,15 @@ int main()
       return 0;
     }
 
-    stringstream ss(input);
-    vector<string> args;
-    string word;
-    while (ss >> word)
-    {
-      args.push_back(word);
-    }
+    // stringstream ss(input);
+    // vector<string> args;
+    // string word;
+    // while (ss >> word)
+    // {
+    //   args.push_back(word);
+    // }
+
+    vector<string> args = parse_input(input);
 
     if (args.empty())
       continue;
