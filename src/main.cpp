@@ -1,4 +1,5 @@
 #include <iostream>
+#include <unordered_set>
 using namespace std;
 
 int main()
@@ -6,6 +7,8 @@ int main()
   // Flush after every cout / std:cerr
   cout << unitbuf;
   cerr << unitbuf;
+
+  unordered_set<string> builtins = {"echo", "type", "exit"};
 
   while (true)
   {
@@ -27,6 +30,22 @@ int main()
       cout << input.substr(5) << endl;
       continue;
     }
+
+    if (input.rfind("type", 0) == 0)
+    {
+      string cmd = input.substr(5);
+
+      if (builtins.count(cmd))
+      {
+        cout << cmd << " is a shell builtin" << endl;
+      }
+      else
+      {
+        cout << cmd << " not found" << endl;
+      }
+      continue;
+    }
+
     cout << input << ": command not found" << endl;
   }
 
