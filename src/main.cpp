@@ -21,6 +21,12 @@ int main()
     {
       return 0;
     }
+
+    if (input.rfind("echo", 0) == 0)
+    {
+      cout << input.substr(5) << endl;
+      continue;
+    }
     cout << input << ": command not found" << endl;
   }
 
