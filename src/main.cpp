@@ -375,9 +375,11 @@ string complete_command(const string &partial_cmd)
 }
 
 // Function to handle input with tab completion
+// Function to handle input with completion for commands and arguments
 string get_input_with_completion()
 {
   string input;
+  size_t cursor_pos = 0;
 
 #ifdef _WIN32
   // Windows version using conio.h
@@ -394,34 +396,40 @@ string get_input_with_completion()
     }
     else if (c == 8 || c == 127)
     { // Backspace
-      if (!input.empty())
+      if (cursor_pos > 0)
       {
-        input.pop_back();
+        input.erase(cursor_pos - 1, 1);
+        cursor_pos--;
         cout << "\b \b" << flush; // Erase character
       }
     }
     else if (c == 9)
     { // Tab key
-      if (!input.empty())
+      if (cursor_pos > 0 && input.find(' ') == string::npos)
       {
-        string completed = complete_command(input);
+        // Only attempt to complete the command if no space has been typed yet
+        string partial_cmd = input.substr(0, cursor_pos);
+        string completed = complete_command(partial_cmd);
+
         if (!completed.empty())
         {
-          // Clear current input
-          for (size_t i = 0; i < input.length(); i++)
+          // Clear current input display
+          for (size_t i = 0; i < cursor_pos; i++)
           {
             cout << "\b \b" << flush;
           }
 
-          // Display completed command with space
-          input = completed + " ";
-          cout << input << flush;
+          // Update input with completed command and add a space
+          input = completed + " " + input.substr(cursor_pos);
+          cursor_pos = completed.length() + 1; // Position cursor after the space
+          cout << input.substr(0, cursor_pos) << flush;
         }
       }
     }
     else if (c >= 32 && c < 127)
     { // Printable characters
-      input.push_back(static_cast<char>(c));
+      input.insert(cursor_pos, 1, static_cast<char>(c));
+      cursor_pos++;
       cout << static_cast<char>(c) << flush;
     }
   }
@@ -450,34 +458,40 @@ string get_input_with_completion()
     }
     else if (c == 127 || c == 8)
     { // Backspace or Delete
-      if (!input.empty())
+      if (cursor_pos > 0)
       {
-        input.pop_back();
+        input.erase(cursor_pos - 1, 1);
+        cursor_pos--;
         cout << "\b \b" << flush;
       }
     }
     else if (c == 9)
     { // Tab
-      if (!input.empty())
+      if (cursor_pos > 0 && input.find(' ') == string::npos)
       {
-        string completed = complete_command(input);
+        // Only attempt to complete the command if no space has been typed yet
+        string partial_cmd = input.substr(0, cursor_pos);
+        string completed = complete_command(partial_cmd);
+
         if (!completed.empty())
         {
-          // Clear current input
-          for (size_t i = 0; i < input.length(); i++)
+          // Clear current input display
+          for (size_t i = 0; i < cursor_pos; i++)
           {
             cout << "\b \b" << flush;
           }
 
-          // Display completed command with space
-          input = completed + " ";
-          cout << input << flush;
+          // Update input with completed command and add a space
+          input = completed + " " + input.substr(cursor_pos);
+          cursor_pos = completed.length() + 1; // Position cursor after the space
+          cout << input.substr(0, cursor_pos) << flush;
         }
       }
     }
     else if (c >= 32 && c < 127)
     { // Printable characters
-      input.push_back(c);
+      input.insert(cursor_pos, 1, static_cast<char>(c));
+      cursor_pos++;
       cout << c << flush;
     }
   }
