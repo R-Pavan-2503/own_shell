@@ -5,6 +5,7 @@
 #include <sstream>
 #include <vector>
 #include <sys/stat.h>
+#include <fstream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -12,12 +13,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <cstring>
 #endif
 
 using namespace std;
 
-// Check if a file is executable (Only for Linux/Mac)
 #ifndef _WIN32
 bool is_executable(const string &path)
 {
@@ -26,7 +27,6 @@ bool is_executable(const string &path)
 }
 #endif
 
-// Find an executable in the PATH environment variable
 string find_in_path(const string &cmd)
 {
   char *path_env = getenv("PATH");
@@ -53,8 +53,7 @@ string find_in_path(const string &cmd)
   return "";
 }
 
-// Execute external command (Cross-platform implementation)
-void execute_external_command(const vector<string> &args)
+void execute_external_command(const vector<string> &args, const string &output_file)
 {
   if (args.empty())
     return;
@@ -62,22 +61,42 @@ void execute_external_command(const vector<string> &args)
   string cmd_path = find_in_path(args[0]);
   if (cmd_path.empty())
   {
-    cout << args[0] << ": command not found" << endl;
+    cerr << args[0] << ": command not found" << endl;
     return;
   }
 
 #ifdef _WIN32
-  // Windows: Use CreateProcess
+  // Windows: Use CreateProcess with output redirection
   string command = cmd_path;
   for (size_t i = 1; i < args.size(); ++i)
   {
     command += " " + args[i];
   }
 
+  SECURITY_ATTRIBUTES sa;
+  sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+  sa.lpSecurityDescriptor = NULL;
+  sa.bInheritHandle = TRUE; // Allow child to inherit handle
+
+  HANDLE hFile = NULL;
+  if (!output_file.empty())
+  {
+    hFile = CreateFileA(output_file.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
+                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+      cerr << "Failed to open file: " << output_file << endl;
+      return;
+    }
+  }
+
   STARTUPINFOA si = {sizeof(si)};
   PROCESS_INFORMATION pi;
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdOutput = hFile ? hFile : GetStdHandle(STD_OUTPUT_HANDLE);
+  si.hStdError = GetStdHandle(STD_ERROR_HANDLE); // Keep stderr in terminal
 
-  if (CreateProcessA(NULL, const_cast<char *>(command.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+  if (CreateProcessA(NULL, const_cast<char *>(command.c_str()), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
   {
     WaitForSingleObject(pi.hProcess, INFINITE);
     CloseHandle(pi.hProcess);
@@ -87,8 +106,11 @@ void execute_external_command(const vector<string> &args)
   {
     cerr << "Failed to execute: " << command << endl;
   }
+
+  if (hFile)
+    CloseHandle(hFile);
 #else
-  // Linux/Mac: Use fork + execvp
+  // Linux/Mac: Use fork + execvp with output redirection
   vector<char *> c_args;
   for (const string &arg : args)
   {
@@ -97,13 +119,18 @@ void execute_external_command(const vector<string> &args)
   c_args.push_back(nullptr);
 
   pid_t pid = fork();
-  if (pid == 0)
+  if (pid == 0) // Child process
   {
+    if (!output_file.empty())
+    {
+      freopen(output_file.c_str(), "w", stdout); // Redirect stdout
+    }
+
     execvp(cmd_path.c_str(), c_args.data());
     perror("execvp failed");
     exit(1);
   }
-  else if (pid > 0)
+  else if (pid > 0) // Parent process
   {
     int status;
     waitpid(pid, &status, 0);
@@ -115,7 +142,7 @@ void execute_external_command(const vector<string> &args)
 #endif
 }
 
-vector<string> parse_input(const string &input)
+vector<string> parse_input(const string &input, string &output_file)
 {
   vector<string> args;
   string word;
@@ -129,10 +156,8 @@ vector<string> parse_input(const string &input)
 
     if (escaped)
     {
-      // Inside double quotes, only escape certain characters
       if (in_double_quotes && (c != '\\' && c != '$' && c != '"' && c != '\n'))
         word += '\\';
-
       word += c;
       escaped = false;
     }
@@ -147,6 +172,30 @@ vector<string> parse_input(const string &input)
     else if (c == '\'' && !in_double_quotes)
     {
       in_single_quotes = !in_single_quotes;
+    }
+    else if ((c == '>' || (c == '1' && i + 1 < input.size() && input[i + 1] == '>')) &&
+             !in_single_quotes && !in_double_quotes)
+    {
+      if (!word.empty())
+      {
+        args.push_back(word);
+        word.clear();
+      }
+
+      // Skip `1>` if present
+      if (c == '1' && input[i + 1] == '>')
+        i++;
+
+      // Skip spaces before the filename
+      while (i + 1 < input.size() && input[i + 1] == ' ')
+        i++;
+
+      size_t j = i + 1;
+      while (j < input.size() && input[j] != ' ')
+        j++;
+
+      output_file = input.substr(i + 1, j - i - 1);
+      i = j - 1;
     }
     else if (c == ' ' && !in_single_quotes && !in_double_quotes)
     {
@@ -192,26 +241,34 @@ int main()
       return 0;
     }
 
-    // stringstream ss(input);
-    // vector<string> args;
-    // string word;
-    // while (ss >> word)
-    // {
-    //   args.push_back(word);
-    // }
-
-    vector<string> args = parse_input(input);
+    string output_file;
+    vector<string> args = parse_input(input, output_file);
 
     if (args.empty())
       continue;
 
     if (args[0] == "echo")
     {
+      ofstream out;
+      streambuf *coutbuf = cout.rdbuf();
+
+      if (!output_file.empty())
+      {
+        out.open(output_file);
+        cout.rdbuf(out.rdbuf());
+      }
+
       for (size_t i = 1; i < args.size(); ++i)
       {
         cout << args[i] << (i + 1 < args.size() ? " " : "");
       }
       cout << endl;
+
+      if (!output_file.empty())
+      {
+        cout.rdbuf(coutbuf);
+        out.close();
+      }
       continue;
     }
 
@@ -242,8 +299,7 @@ int main()
       continue;
     }
 
-    // Run external command
-    execute_external_command(args);
+    execute_external_command(args, output_file);
   }
   return 0;
 }
