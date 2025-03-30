@@ -376,6 +376,7 @@ string complete_command(const string &partial_cmd)
 
 // Function to handle input with tab completion
 // Function to handle input with completion for commands and arguments
+// Function to handle input with completion for commands and arguments
 string get_input_with_completion()
 {
   string input;
@@ -423,6 +424,11 @@ string get_input_with_completion()
           input = completed + " " + input.substr(cursor_pos);
           cursor_pos = completed.length() + 1; // Position cursor after the space
           cout << input.substr(0, cursor_pos) << flush;
+        }
+        else
+        {
+          // Command not found - ring the bell
+          cout << '\a' << flush;
         }
       }
     }
@@ -485,6 +491,11 @@ string get_input_with_completion()
           input = completed + " " + input.substr(cursor_pos);
           cursor_pos = completed.length() + 1; // Position cursor after the space
           cout << input.substr(0, cursor_pos) << flush;
+        }
+        else
+        {
+          // Command not found - ring the bell
+          cout << '\a' << flush;
         }
       }
     }
