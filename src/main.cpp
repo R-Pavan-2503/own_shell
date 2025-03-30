@@ -9,12 +9,14 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <conio.h> // For _getch() on Windows
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
+#include <termios.h> // Only included for Unix systems
 #endif
 
 using namespace std;
@@ -350,6 +352,143 @@ vector<string> parse_input(const string &input, RedirectInfo &stdout_info, Redir
   return args;
 }
 
+// Function to handle tab completion for builtin commands
+string complete_command(const string &partial_cmd)
+{
+  // List of built-in commands (same as in main)
+  static const unordered_set<string> builtins = {"echo", "type", "exit"};
+
+  string completed_cmd = "";
+
+  // Check if the partial command matches any builtin
+  for (const auto &cmd : builtins)
+  {
+    if (cmd.substr(0, partial_cmd.length()) == partial_cmd)
+    {
+      // If we find a match, return the full command
+      completed_cmd = cmd;
+      break;
+    }
+  }
+
+  return completed_cmd;
+}
+
+// Function to handle input with tab completion
+string get_input_with_completion()
+{
+  string input;
+
+#ifdef _WIN32
+  // Windows version using conio.h
+  cout << "$ " << flush;
+
+  while (true)
+  {
+    int c = _getch(); // Get character without echo
+
+    if (c == 13)
+    { // Enter key
+      cout << endl;
+      break;
+    }
+    else if (c == 8 || c == 127)
+    { // Backspace
+      if (!input.empty())
+      {
+        input.pop_back();
+        cout << "\b \b" << flush; // Erase character
+      }
+    }
+    else if (c == 9)
+    { // Tab key
+      if (!input.empty())
+      {
+        string completed = complete_command(input);
+        if (!completed.empty())
+        {
+          // Clear current input
+          for (size_t i = 0; i < input.length(); i++)
+          {
+            cout << "\b \b" << flush;
+          }
+
+          // Display completed command with space
+          input = completed + " ";
+          cout << input << flush;
+        }
+      }
+    }
+    else if (c >= 32 && c < 127)
+    { // Printable characters
+      input.push_back(static_cast<char>(c));
+      cout << static_cast<char>(c) << flush;
+    }
+  }
+#else
+  // Unix/Linux version using termios
+  struct termios old_term, new_term;
+
+  // Save current terminal settings
+  tcgetattr(STDIN_FILENO, &old_term);
+  new_term = old_term;
+
+  // Set terminal to raw mode
+  new_term.c_lflag &= ~(ICANON | ECHO);
+  tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
+
+  cout << "$ " << flush;
+
+  while (true)
+  {
+    char c = getchar();
+
+    if (c == '\n')
+    {
+      cout << endl;
+      break;
+    }
+    else if (c == 127 || c == 8)
+    { // Backspace or Delete
+      if (!input.empty())
+      {
+        input.pop_back();
+        cout << "\b \b" << flush;
+      }
+    }
+    else if (c == 9)
+    { // Tab
+      if (!input.empty())
+      {
+        string completed = complete_command(input);
+        if (!completed.empty())
+        {
+          // Clear current input
+          for (size_t i = 0; i < input.length(); i++)
+          {
+            cout << "\b \b" << flush;
+          }
+
+          // Display completed command with space
+          input = completed + " ";
+          cout << input << flush;
+        }
+      }
+    }
+    else if (c >= 32 && c < 127)
+    { // Printable characters
+      input.push_back(c);
+      cout << c << flush;
+    }
+  }
+
+  // Restore terminal settings
+  tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+#endif
+
+  return input;
+}
+
 int main()
 {
   cout << unitbuf;
@@ -359,13 +498,8 @@ int main()
 
   while (true)
   {
-    cout << "$ ";
-
-    string input;
-    if (!getline(cin, input))
-    {
-      break;
-    }
+    // Use our new input function instead of getline
+    string input = get_input_with_completion();
 
     if (input == "exit 0")
     {
