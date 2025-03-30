@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <cstring>
 #include <termios.h> // Only included for Unix systems
+#include <dirent.h>  // For directory operations on Unix
 #endif
 
 using namespace std;
@@ -352,13 +353,11 @@ vector<string> parse_input(const string &input, RedirectInfo &stdout_info, Redir
   return args;
 }
 
-// Function to handle tab completion for builtin commands
+// Enhanced function to handle tab completion for builtin commands and executables in PATH
 string complete_command(const string &partial_cmd)
 {
   // List of built-in commands (same as in main)
   static const unordered_set<string> builtins = {"echo", "type", "exit"};
-
-  string completed_cmd = "";
 
   // Check if the partial command matches any builtin
   for (const auto &cmd : builtins)
@@ -366,17 +365,79 @@ string complete_command(const string &partial_cmd)
     if (cmd.substr(0, partial_cmd.length()) == partial_cmd)
     {
       // If we find a match, return the full command
-      completed_cmd = cmd;
-      break;
+      return cmd;
     }
   }
 
-  return completed_cmd;
+  // If no builtin match, search for executables in PATH
+  char *path_env = getenv("PATH");
+  if (!path_env)
+    return "";
+
+  stringstream ss(path_env);
+  string dir;
+  vector<string> matches;
+
+  while (getline(ss, dir, ':'))
+  {
+#ifdef _WIN32
+    WIN32_FIND_DATAA findData;
+    string search_path = dir + "\\*";
+    HANDLE hFind = FindFirstFileA(search_path.c_str(), &findData);
+
+    if (hFind != INVALID_HANDLE_VALUE)
+    {
+      do
+      {
+        string filename = findData.cFileName;
+        if (filename.substr(0, partial_cmd.length()) == partial_cmd)
+        {
+          // Check if the file is executable
+          string full_path = dir + "\\" + filename;
+          if (GetFileAttributesA(full_path.c_str()) != INVALID_FILE_ATTRIBUTES)
+          {
+            matches.push_back(filename);
+            break; // Just take the first match for simplicity
+          }
+        }
+      } while (FindNextFileA(hFind, &findData));
+
+      FindClose(hFind);
+    }
+#else
+    DIR *dp = opendir(dir.c_str());
+    if (dp != NULL)
+    {
+      struct dirent *entry;
+      while ((entry = readdir(dp)) != NULL)
+      {
+        string filename = entry->d_name;
+        if (filename.substr(0, partial_cmd.length()) == partial_cmd)
+        {
+          // Check if the file is executable
+          string full_path = dir + "/" + filename;
+          struct stat buffer;
+          if (stat(full_path.c_str(), &buffer) == 0 &&
+              (buffer.st_mode & S_IXUSR))
+          {
+            matches.push_back(filename);
+            break; // Just take the first match for simplicity
+          }
+        }
+      }
+      closedir(dp);
+    }
+#endif
+
+    if (!matches.empty())
+      break; // We found a match, no need to check other directories
+  }
+
+  // Return the first match found, or empty string if no match
+  return matches.empty() ? "" : matches[0];
 }
 
-// Function to handle input with tab completion
-// Function to handle input with completion for commands and arguments
-// Function to handle input with completion for commands and arguments
+// Function to handle input with tab completion for commands and arguments
 string get_input_with_completion()
 {
   string input;
