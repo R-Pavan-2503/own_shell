@@ -19,6 +19,13 @@
 
 using namespace std;
 
+// Structure to hold redirection information
+struct RedirectInfo
+{
+  string filename;
+  bool append;
+};
+
 #ifndef _WIN32
 bool is_executable(const string &path)
 {
@@ -53,7 +60,7 @@ string find_in_path(const string &cmd)
   return "";
 }
 
-void execute_external_command(const vector<string> &args, const string &output_file, const string &error_file)
+void execute_external_command(const vector<string> &args, const RedirectInfo &stdout_info, const RedirectInfo &stderr_info)
 {
   if (args.empty())
     return;
@@ -79,28 +86,42 @@ void execute_external_command(const vector<string> &args, const string &output_f
   sa.bInheritHandle = TRUE; // Allow child to inherit handle
 
   HANDLE hFile = NULL;
-  if (!output_file.empty())
+  if (!stdout_info.filename.empty())
   {
-    hFile = CreateFileA(output_file.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
-                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD dwCreationDisposition = stdout_info.append ? OPEN_ALWAYS : CREATE_ALWAYS;
+    hFile = CreateFileA(stdout_info.filename.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
+                        dwCreationDisposition, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
-      cerr << "Failed to open file: " << output_file << endl;
+      cerr << "Failed to open file: " << stdout_info.filename << endl;
       return;
+    }
+
+    // If appending, seek to end of file
+    if (stdout_info.append)
+    {
+      SetFilePointer(hFile, 0, NULL, FILE_END);
     }
   }
 
   HANDLE hErrorFile = NULL;
-  if (!error_file.empty())
+  if (!stderr_info.filename.empty())
   {
-    hErrorFile = CreateFileA(error_file.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
-                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD dwCreationDisposition = stderr_info.append ? OPEN_ALWAYS : CREATE_ALWAYS;
+    hErrorFile = CreateFileA(stderr_info.filename.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
+                             dwCreationDisposition, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hErrorFile == INVALID_HANDLE_VALUE)
     {
-      cerr << "Failed to open file: " << error_file << endl;
+      cerr << "Failed to open file: " << stderr_info.filename << endl;
       if (hFile)
         CloseHandle(hFile);
       return;
+    }
+
+    // If appending, seek to end of file
+    if (stderr_info.append)
+    {
+      SetFilePointer(hErrorFile, 0, NULL, FILE_END);
     }
   }
 
@@ -138,9 +159,11 @@ void execute_external_command(const vector<string> &args, const string &output_f
   pid_t pid = fork();
   if (pid == 0) // Child process
   {
-    if (!output_file.empty())
+    if (!stdout_info.filename.empty())
     {
-      int fd = open(output_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      int flags = O_WRONLY | O_CREAT;
+      flags |= stdout_info.append ? O_APPEND : O_TRUNC;
+      int fd = open(stdout_info.filename.c_str(), flags, 0644);
       if (fd == -1)
       {
         perror("open output file failed");
@@ -150,9 +173,11 @@ void execute_external_command(const vector<string> &args, const string &output_f
       close(fd);
     }
 
-    if (!error_file.empty())
+    if (!stderr_info.filename.empty())
     {
-      int fd = open(error_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      int flags = O_WRONLY | O_CREAT;
+      flags |= stderr_info.append ? O_APPEND : O_TRUNC;
+      int fd = open(stderr_info.filename.c_str(), flags, 0644);
       if (fd == -1)
       {
         perror("open error file failed");
@@ -178,7 +203,7 @@ void execute_external_command(const vector<string> &args, const string &output_f
 #endif
 }
 
-vector<string> parse_input(const string &input, string &output_file, string &error_file)
+vector<string> parse_input(const string &input, RedirectInfo &stdout_info, RedirectInfo &stderr_info)
 {
   vector<string> args;
   string word;
@@ -209,19 +234,67 @@ vector<string> parse_input(const string &input, string &output_file, string &err
     {
       in_single_quotes = !in_single_quotes;
     }
-    else if ((c == '>' ||
-              (c == '1' && i + 1 < input.size() && input[i + 1] == '>') ||
-              (c == '2' && i + 1 < input.size() && input[i + 1] == '>')) &&
-             !in_single_quotes && !in_double_quotes)
+    else if ((!in_single_quotes && !in_double_quotes) &&
+             ((c == '>' && i + 1 < input.size() && input[i + 1] == '>') ||                                                // >>
+              (c == '1' && i + 1 < input.size() && input[i + 1] == '>' && i + 2 < input.size() && input[i + 2] == '>') || // 1>>
+              (c == '2' && i + 1 < input.size() && input[i + 1] == '>' && i + 2 < input.size() && input[i + 2] == '>')))  // 2>>
     {
+      // Handle >> operators (append mode)
       if (!word.empty())
       {
         args.push_back(word);
         word.clear();
       }
 
-      // Determine which redirection we're handling
-      bool is_stderr = (c == '2' && input[i + 1] == '>');
+      bool is_stderr = (c == '2');
+
+      // Skip the operator (>> or 1>> or 2>>)
+      if (c == '>')
+        i++;
+      else
+        i += 2;
+
+      // Skip spaces before the filename
+      while (i + 1 < input.size() && input[i + 1] == ' ')
+        i++;
+
+      size_t j = i + 1;
+      while (j < input.size() && input[j] != ' ' &&
+             !(input[j] == '>' ||
+               (input[j] == '1' && j + 1 < input.size() && input[j + 1] == '>') ||
+               (input[j] == '2' && j + 1 < input.size() && input[j + 1] == '>')))
+        j++;
+
+      if (i + 1 < input.size())
+      {
+        string filename = input.substr(i + 1, j - i - 1);
+        if (is_stderr)
+        {
+          stderr_info.filename = filename;
+          stderr_info.append = true;
+        }
+        else
+        {
+          stdout_info.filename = filename;
+          stdout_info.append = true;
+        }
+      }
+
+      i = j - 1;
+    }
+    else if ((!in_single_quotes && !in_double_quotes) &&
+             ((c == '>') ||
+              (c == '1' && i + 1 < input.size() && input[i + 1] == '>') ||
+              (c == '2' && i + 1 < input.size() && input[i + 1] == '>')))
+    {
+      // Handle > operators (truncate mode)
+      if (!word.empty())
+      {
+        args.push_back(word);
+        word.clear();
+      }
+
+      bool is_stderr = (c == '2' && i + 1 < input.size() && input[i + 1] == '>');
 
       // Skip the operator (> or 1> or 2>)
       if (c != '>')
@@ -232,18 +305,25 @@ vector<string> parse_input(const string &input, string &output_file, string &err
         i++;
 
       size_t j = i + 1;
-      while (j < input.size() && input[j] != ' ' && input[j] != '>' &&
-             !(input[j] == '2' && j + 1 < input.size() && input[j + 1] == '>') &&
-             !(input[j] == '1' && j + 1 < input.size() && input[j + 1] == '>'))
+      while (j < input.size() && input[j] != ' ' &&
+             !(input[j] == '>' ||
+               (input[j] == '1' && j + 1 < input.size() && input[j + 1] == '>') ||
+               (input[j] == '2' && j + 1 < input.size() && input[j + 1] == '>')))
         j++;
 
       if (i + 1 < input.size())
       {
         string filename = input.substr(i + 1, j - i - 1);
         if (is_stderr)
-          error_file = filename;
+        {
+          stderr_info.filename = filename;
+          stderr_info.append = false;
+        }
         else
-          output_file = filename;
+        {
+          stdout_info.filename = filename;
+          stdout_info.append = false;
+        }
       }
 
       i = j - 1;
@@ -292,9 +372,9 @@ int main()
       return 0;
     }
 
-    string output_file;
-    string error_file;
-    vector<string> args = parse_input(input, output_file, error_file);
+    RedirectInfo stdout_info = {"", false};
+    RedirectInfo stderr_info = {"", false};
+    vector<string> args = parse_input(input, stdout_info, stderr_info);
 
     if (args.empty())
       continue;
@@ -306,15 +386,23 @@ int main()
       streambuf *coutbuf = cout.rdbuf();
       streambuf *cerrbuf = cerr.rdbuf();
 
-      if (!output_file.empty())
+      if (!stdout_info.filename.empty())
       {
-        out.open(output_file);
+        ios_base::openmode mode = ios::out;
+        if (stdout_info.append)
+          mode |= ios::app;
+
+        out.open(stdout_info.filename, mode);
         cout.rdbuf(out.rdbuf());
       }
 
-      if (!error_file.empty())
+      if (!stderr_info.filename.empty())
       {
-        err.open(error_file);
+        ios_base::openmode mode = ios::out;
+        if (stderr_info.append)
+          mode |= ios::app;
+
+        err.open(stderr_info.filename, mode);
         cerr.rdbuf(err.rdbuf());
       }
 
@@ -324,13 +412,13 @@ int main()
       }
       cout << endl;
 
-      if (!output_file.empty())
+      if (!stdout_info.filename.empty())
       {
         cout.rdbuf(coutbuf);
         out.close();
       }
 
-      if (!error_file.empty())
+      if (!stderr_info.filename.empty())
       {
         cerr.rdbuf(cerrbuf);
         err.close();
@@ -365,7 +453,7 @@ int main()
       continue;
     }
 
-    execute_external_command(args, output_file, error_file);
+    execute_external_command(args, stdout_info, stderr_info);
   }
   return 0;
 }
