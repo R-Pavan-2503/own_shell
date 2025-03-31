@@ -6,6 +6,7 @@
 #include <vector>
 #include <sys/stat.h>
 #include <fstream>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -354,29 +355,37 @@ vector<string> parse_input(const string &input, RedirectInfo &stdout_info, Redir
 }
 
 // Enhanced function to handle tab completion for builtin commands and executables in PATH
-string complete_command(const string &partial_cmd)
+// Modified to return all matches instead of just one
+// Modified to return all matches instead of just one, sorted alphabetically
+vector<string> complete_command(const string &partial_cmd)
 {
   // List of built-in commands (same as in main)
   static const unordered_set<string> builtins = {"echo", "type", "exit"};
+  vector<string> matches;
 
   // Check if the partial command matches any builtin
   for (const auto &cmd : builtins)
   {
     if (cmd.substr(0, partial_cmd.length()) == partial_cmd)
     {
-      // If we find a match, return the full command
-      return cmd;
+      matches.push_back(cmd);
     }
   }
 
-  // If no builtin match, search for executables in PATH
+  // If we found builtin matches, sort and return them
+  if (!matches.empty())
+  {
+    sort(matches.begin(), matches.end());
+    return matches;
+  }
+
+  // Search for executables in PATH
   char *path_env = getenv("PATH");
   if (!path_env)
-    return "";
+    return matches; // Empty vector
 
   stringstream ss(path_env);
   string dir;
-  vector<string> matches;
 
   while (getline(ss, dir, ':'))
   {
@@ -397,7 +406,6 @@ string complete_command(const string &partial_cmd)
           if (GetFileAttributesA(full_path.c_str()) != INVALID_FILE_ATTRIBUTES)
           {
             matches.push_back(filename);
-            break; // Just take the first match for simplicity
           }
         }
       } while (FindNextFileA(hFind, &findData));
@@ -421,20 +429,17 @@ string complete_command(const string &partial_cmd)
               (buffer.st_mode & S_IXUSR))
           {
             matches.push_back(filename);
-            break; // Just take the first match for simplicity
           }
         }
       }
       closedir(dp);
     }
 #endif
-
-    if (!matches.empty())
-      break; // We found a match, no need to check other directories
   }
 
-  // Return the first match found, or empty string if no match
-  return matches.empty() ? "" : matches[0];
+  // Sort matches alphabetically
+  sort(matches.begin(), matches.end());
+  return matches;
 }
 
 // Function to handle input with tab completion for commands and arguments
@@ -442,6 +447,8 @@ string get_input_with_completion()
 {
   string input;
   size_t cursor_pos = 0;
+  bool tab_pressed_once = false;
+  vector<string> previous_matches;
 
 #ifdef _WIN32
   // Windows version using conio.h
@@ -463,6 +470,7 @@ string get_input_with_completion()
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
         cout << "\b \b" << flush; // Erase character
+        tab_pressed_once = false; // Reset tab state on backspace
       }
     }
     else if (c == 9)
@@ -471,26 +479,56 @@ string get_input_with_completion()
       {
         // Only attempt to complete the command if no space has been typed yet
         string partial_cmd = input.substr(0, cursor_pos);
-        string completed = complete_command(partial_cmd);
+        vector<string> matches = complete_command(partial_cmd);
 
-        if (!completed.empty())
+        if (matches.size() == 1)
         {
-          // Clear current input display
+          // Single match - complete the command
           for (size_t i = 0; i < cursor_pos; i++)
           {
             cout << "\b \b" << flush;
           }
 
           // Update input with completed command and add a space
-          input = completed + " " + input.substr(cursor_pos);
-          cursor_pos = completed.length() + 1; // Position cursor after the space
+          input = matches[0] + " " + input.substr(cursor_pos);
+          cursor_pos = matches[0].length() + 1; // Position cursor after the space
           cout << input.substr(0, cursor_pos) << flush;
+          tab_pressed_once = false; // Reset tab state after completion
+        }
+        else if (matches.size() > 1)
+        {
+          if (!tab_pressed_once)
+          {
+            // First tab press with multiple matches, just ring the bell
+            cout << '\a' << flush;
+            tab_pressed_once = true;
+            previous_matches = matches;
+          }
+          else
+          {
+            // Second tab press, display all matches
+            cout << endl;
+            for (size_t i = 0; i < matches.size(); ++i)
+            {
+              cout << matches[i];
+              if (i < matches.size() - 1)
+                cout << "  "; // Two spaces between matches
+            }
+            cout << endl
+                 << "$ " << input.substr(0, cursor_pos) << flush;
+            tab_pressed_once = false; // Reset tab state after displaying matches
+          }
         }
         else
         {
-          // Command not found - ring the bell
+          // No matches - ring the bell
           cout << '\a' << flush;
+          tab_pressed_once = false; // Reset tab state
         }
+      }
+      else
+      {
+        tab_pressed_once = false; // Reset tab state if not in command position
       }
     }
     else if (c >= 32 && c < 127)
@@ -498,6 +536,7 @@ string get_input_with_completion()
       input.insert(cursor_pos, 1, static_cast<char>(c));
       cursor_pos++;
       cout << static_cast<char>(c) << flush;
+      tab_pressed_once = false; // Reset tab state on any character input
     }
   }
 #else
@@ -530,6 +569,7 @@ string get_input_with_completion()
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
         cout << "\b \b" << flush;
+        tab_pressed_once = false; // Reset tab state on backspace
       }
     }
     else if (c == 9)
@@ -538,26 +578,56 @@ string get_input_with_completion()
       {
         // Only attempt to complete the command if no space has been typed yet
         string partial_cmd = input.substr(0, cursor_pos);
-        string completed = complete_command(partial_cmd);
+        vector<string> matches = complete_command(partial_cmd);
 
-        if (!completed.empty())
+        if (matches.size() == 1)
         {
-          // Clear current input display
+          // Single match - complete the command
           for (size_t i = 0; i < cursor_pos; i++)
           {
             cout << "\b \b" << flush;
           }
 
           // Update input with completed command and add a space
-          input = completed + " " + input.substr(cursor_pos);
-          cursor_pos = completed.length() + 1; // Position cursor after the space
+          input = matches[0] + " " + input.substr(cursor_pos);
+          cursor_pos = matches[0].length() + 1; // Position cursor after the space
           cout << input.substr(0, cursor_pos) << flush;
+          tab_pressed_once = false; // Reset tab state after completion
+        }
+        else if (matches.size() > 1)
+        {
+          if (!tab_pressed_once)
+          {
+            // First tab press with multiple matches, just ring the bell
+            cout << '\a' << flush;
+            tab_pressed_once = true;
+            previous_matches = matches;
+          }
+          else
+          {
+            // Second tab press, display all matches
+            cout << endl;
+            for (size_t i = 0; i < matches.size(); ++i)
+            {
+              cout << matches[i];
+              if (i < matches.size() - 1)
+                cout << "  "; // Two spaces between matches
+            }
+            cout << endl
+                 << "$ " << input.substr(0, cursor_pos) << flush;
+            tab_pressed_once = false; // Reset tab state after displaying matches
+          }
         }
         else
         {
-          // Command not found - ring the bell
+          // No matches - ring the bell
           cout << '\a' << flush;
+          tab_pressed_once = false; // Reset tab state
         }
+      }
+      else
+      {
+        tab_pressed_once = false; // Reset tab state if not in command position
       }
     }
     else if (c >= 32 && c < 127)
@@ -565,6 +635,7 @@ string get_input_with_completion()
       input.insert(cursor_pos, 1, static_cast<char>(c));
       cursor_pos++;
       cout << c << flush;
+      tab_pressed_once = false; // Reset tab state on any character input
     }
   }
 
