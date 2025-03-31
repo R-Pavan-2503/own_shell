@@ -678,16 +678,28 @@ string get_input_with_completion()
   return input;
 }
 
+void execute_builtin_pwd()
+{
+  char cwd[PATH_MAX];
+  if (getcwd(cwd, sizeof(cwd)) != NULL)
+  {
+    cout << cwd << endl;
+  }
+  else
+  {
+    perror("pwd");
+  }
+}
+
 int main()
 {
   cout << unitbuf;
   cerr << unitbuf;
 
-  unordered_set<string> builtins = {"echo", "type", "exit"};
+  unordered_set<string> builtins = {"echo", "type", "exit", "pwd"};
 
   while (true)
   {
-    // Use our new input function instead of getline
     string input = get_input_with_completion();
 
     if (input == "exit 0")
@@ -701,6 +713,12 @@ int main()
 
     if (args.empty())
       continue;
+
+    if (args[0] == "pwd")
+    {
+      execute_builtin_pwd();
+      continue;
+    }
 
     if (args[0] == "echo")
     {
