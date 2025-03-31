@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_set>
+
 #include <cstdlib>
 #include <sstream>
 #include <vector>
@@ -10,11 +11,12 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <conio.h> // For _getch() on Windows
+#include <conio.h>  // For _getch() on Windows
+#include <direct.h> // For _chdir() on Windows
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
+#include <unistd.h> // For chdir() and getcwd()
 #include <fcntl.h>
 #include <cstring>
 #include <termios.h> // Only included for Unix systems
@@ -678,11 +680,63 @@ string get_input_with_completion()
   return input;
 }
 
+// Function to execute cd command
+
+// Function to execute cd command
+#include <iostream>
+#include <unistd.h> // For chdir() and getcwd()
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <errno.h>
+#include <unordered_set>
+#include <vector>
+#include <fstream>
+#include <sstream>
+#include <limits.h> // For PATH_MAX in POSIX systems
+#include <cstdlib>  // For getenv()
+
+using namespace std;
+
+// Function to execute cd command
+void execute_cd(const std::string &path)
+{
+  std::string final_path = path;
+
+  // If the path starts with '~', replace it with the HOME environment variable
+  if (path[0] == '~')
+  {
+    const char *home = getenv("HOME");
+    if (home)
+    {
+      final_path = home + std::string(path.substr(1)); // Replace ~ with HOME
+    }
+    else
+    {
+      std::cerr << "cd: HOME not set" << std::endl;
+      return;
+    }
+  }
+
+#ifdef _WIN32
+  if (_chdir(final_path.c_str()) == -1)
+  { // For Windows
+    std::cerr << "cd: " << final_path << ": No such file or directory" << std::endl;
+  }
+#else
+  if (chdir(final_path.c_str()) == -1)
+  { // For Unix-like systems
+    std::cerr << "cd: " << final_path << ": No such file or directory" << std::endl;
+  }
+#endif
+}
+
+// Existing function for pwd
 void execute_builtin_pwd()
 {
-  char cwd[PATH_MAX];
+  char cwd[PATH_MAX]; // Use PATH_MAX for POSIX systems
   if (getcwd(cwd, sizeof(cwd)) != NULL)
-  {
+  { // POSIX alternative to _getcwd()
     cout << cwd << endl;
   }
   else
@@ -696,7 +750,7 @@ int main()
   cout << unitbuf;
   cerr << unitbuf;
 
-  unordered_set<string> builtins = {"echo", "type", "exit", "pwd"};
+  unordered_set<string> builtins = {"echo", "type", "exit", "pwd", "cd"};
 
   while (true)
   {
@@ -794,7 +848,23 @@ int main()
       continue;
     }
 
+    // Handling 'cd' command
+    if (args[0] == "cd")
+    {
+      if (args.size() < 2)
+      {
+        cerr << "cd: missing operand" << endl;
+      }
+      else
+      {
+        string path = args[1];
+        execute_cd(path); // Call the execute_cd function
+      }
+      continue;
+    }
+
     execute_external_command(args, stdout_info, stderr_info);
   }
+
   return 0;
 }
