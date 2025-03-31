@@ -354,8 +354,42 @@ vector<string> parse_input(const string &input, RedirectInfo &stdout_info, Redir
   return args;
 }
 
+// Function to find the longest common prefix of a vector of strings
+string find_longest_common_prefix(const vector<string> &matches)
+{
+  if (matches.empty())
+  {
+    return "";
+  }
+  if (matches.size() == 1)
+  {
+    return matches[0];
+  }
+
+  string prefix = matches[0];
+  for (size_t i = 1; i < matches.size(); ++i)
+  {
+    // Find common prefix between current prefix and next string
+    size_t j = 0;
+    while (j < prefix.length() && j < matches[i].length() &&
+           prefix[j] == matches[i][j])
+    {
+      j++;
+    }
+    // Update prefix to the common part
+    prefix = prefix.substr(0, j);
+
+    // If no common prefix found, exit early
+    if (prefix.empty())
+    {
+      break;
+    }
+  }
+
+  return prefix;
+}
+
 // Enhanced function to handle tab completion for builtin commands and executables in PATH
-// Modified to return all matches instead of just one
 // Modified to return all matches instead of just one, sorted alphabetically
 vector<string> complete_command(const string &partial_cmd)
 {
@@ -442,7 +476,6 @@ vector<string> complete_command(const string &partial_cmd)
   return matches;
 }
 
-// Function to handle input with tab completion for commands and arguments
 string get_input_with_completion()
 {
   string input;
@@ -451,12 +484,11 @@ string get_input_with_completion()
   vector<string> previous_matches;
 
 #ifdef _WIN32
-  // Windows version using conio.h
   cout << "$ " << flush;
 
   while (true)
   {
-    int c = _getch(); // Get character without echo
+    int c = _getch();
 
     if (c == 13)
     { // Enter key
@@ -469,85 +501,83 @@ string get_input_with_completion()
       {
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
-        cout << "\b \b" << flush; // Erase character
-        tab_pressed_once = false; // Reset tab state on backspace
+        cout << "\b \b" << flush;
+        tab_pressed_once = false;
       }
     }
     else if (c == 9)
     { // Tab key
       if (cursor_pos > 0 && input.find(' ') == string::npos)
       {
-        // Only attempt to complete the command if no space has been typed yet
         string partial_cmd = input.substr(0, cursor_pos);
         vector<string> matches = complete_command(partial_cmd);
 
-        if (matches.size() == 1)
+        if (matches.empty())
         {
-          // Single match - complete the command
-          for (size_t i = 0; i < cursor_pos; i++)
-          {
-            cout << "\b \b" << flush;
-          }
-
-          // Update input with completed command and add a space
-          input = matches[0] + " " + input.substr(cursor_pos);
-          cursor_pos = matches[0].length() + 1; // Position cursor after the space
-          cout << input.substr(0, cursor_pos) << flush;
-          tab_pressed_once = false; // Reset tab state after completion
+          cout << '\a' << flush;
+          tab_pressed_once = false;
         }
-        else if (matches.size() > 1)
+        else
         {
-          if (!tab_pressed_once)
+          string common_prefix = find_longest_common_prefix(matches);
+
+          if (common_prefix.length() > partial_cmd.length())
           {
-            // First tab press with multiple matches, just ring the bell
+            for (size_t i = 0; i < cursor_pos; i++)
+            {
+              cout << "\b \b" << flush;
+            }
+
+            input = common_prefix + input.substr(cursor_pos);
+            cursor_pos = common_prefix.length();
+            cout << input.substr(0, cursor_pos) << flush;
+
+            // FIX: Only add space if this is the **only match**
+            if (matches.size() == 1)
+            {
+              input += " ";
+              cursor_pos++;
+              cout << " " << flush;
+            }
+
+            tab_pressed_once = false;
+          }
+          else if (!tab_pressed_once)
+          {
             cout << '\a' << flush;
             tab_pressed_once = true;
             previous_matches = matches;
           }
           else
           {
-            // Second tab press, display all matches
             cout << endl;
-            for (size_t i = 0; i < matches.size(); ++i)
+            for (const auto &match : matches)
             {
-              cout << matches[i];
-              if (i < matches.size() - 1)
-                cout << "  "; // Two spaces between matches
+              cout << match << "  ";
             }
             cout << endl
                  << "$ " << input.substr(0, cursor_pos) << flush;
-            tab_pressed_once = false; // Reset tab state after displaying matches
+            tab_pressed_once = false;
           }
-        }
-        else
-        {
-          // No matches - ring the bell
-          cout << '\a' << flush;
-          tab_pressed_once = false; // Reset tab state
         }
       }
       else
       {
-        tab_pressed_once = false; // Reset tab state if not in command position
+        tab_pressed_once = false;
       }
     }
     else if (c >= 32 && c < 127)
-    { // Printable characters
+    {
       input.insert(cursor_pos, 1, static_cast<char>(c));
       cursor_pos++;
       cout << static_cast<char>(c) << flush;
-      tab_pressed_once = false; // Reset tab state on any character input
+      tab_pressed_once = false;
     }
   }
 #else
-  // Unix/Linux version using termios
   struct termios old_term, new_term;
-
-  // Save current terminal settings
   tcgetattr(STDIN_FILENO, &old_term);
   new_term = old_term;
-
-  // Set terminal to raw mode
   new_term.c_lflag &= ~(ICANON | ECHO);
   tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
 
@@ -563,83 +593,85 @@ string get_input_with_completion()
       break;
     }
     else if (c == 127 || c == 8)
-    { // Backspace or Delete
+    {
       if (cursor_pos > 0)
       {
         input.erase(cursor_pos - 1, 1);
         cursor_pos--;
         cout << "\b \b" << flush;
-        tab_pressed_once = false; // Reset tab state on backspace
+        tab_pressed_once = false;
       }
     }
     else if (c == 9)
-    { // Tab
+    {
       if (cursor_pos > 0 && input.find(' ') == string::npos)
       {
-        // Only attempt to complete the command if no space has been typed yet
         string partial_cmd = input.substr(0, cursor_pos);
         vector<string> matches = complete_command(partial_cmd);
 
-        if (matches.size() == 1)
+        if (matches.empty())
         {
-          // Single match - complete the command
-          for (size_t i = 0; i < cursor_pos; i++)
-          {
-            cout << "\b \b" << flush;
-          }
-
-          // Update input with completed command and add a space
-          input = matches[0] + " " + input.substr(cursor_pos);
-          cursor_pos = matches[0].length() + 1; // Position cursor after the space
-          cout << input.substr(0, cursor_pos) << flush;
-          tab_pressed_once = false; // Reset tab state after completion
+          cout << '\a' << flush;
+          tab_pressed_once = false;
         }
-        else if (matches.size() > 1)
+        else
         {
-          if (!tab_pressed_once)
+          string common_prefix = find_longest_common_prefix(matches);
+
+          if (common_prefix.length() > partial_cmd.length())
           {
-            // First tab press with multiple matches, just ring the bell
+            for (size_t i = 0; i < cursor_pos; i++)
+            {
+              cout << "\b \b" << flush;
+            }
+
+            input = common_prefix + input.substr(cursor_pos);
+            cursor_pos = common_prefix.length();
+            cout << input.substr(0, cursor_pos) << flush;
+
+            // FIX: Only add space if this is the **only match**
+            if (matches.size() == 1)
+            {
+              input += " ";
+              cursor_pos++;
+              cout << " " << flush;
+            }
+
+            tab_pressed_once = false;
+          }
+          else if (!tab_pressed_once)
+          {
             cout << '\a' << flush;
             tab_pressed_once = true;
             previous_matches = matches;
           }
           else
           {
-            // Second tab press, display all matches
             cout << endl;
-            for (size_t i = 0; i < matches.size(); ++i)
+            for (const auto &match : matches)
             {
-              cout << matches[i];
-              if (i < matches.size() - 1)
-                cout << "  "; // Two spaces between matches
+              cout << match << "  ";
             }
             cout << endl
                  << "$ " << input.substr(0, cursor_pos) << flush;
-            tab_pressed_once = false; // Reset tab state after displaying matches
+            tab_pressed_once = false;
           }
-        }
-        else
-        {
-          // No matches - ring the bell
-          cout << '\a' << flush;
-          tab_pressed_once = false; // Reset tab state
         }
       }
       else
       {
-        tab_pressed_once = false; // Reset tab state if not in command position
+        tab_pressed_once = false;
       }
     }
     else if (c >= 32 && c < 127)
-    { // Printable characters
+    {
       input.insert(cursor_pos, 1, static_cast<char>(c));
       cursor_pos++;
       cout << c << flush;
-      tab_pressed_once = false; // Reset tab state on any character input
+      tab_pressed_once = false;
     }
   }
 
-  // Restore terminal settings
   tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
 #endif
 
